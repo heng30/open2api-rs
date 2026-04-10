@@ -238,11 +238,11 @@ impl OpenAIStreamChunk {
 
     /// Create the final [DONE] marker as an SSE string
     pub fn done_marker() -> String {
-        "data: [DONE]\n\n".to_string()
+        "[DONE]".to_string()
     }
 
     /// Convert to SSE format string
     pub fn to_sse(&self) -> String {
-        format!("data: {}\n\n", serde_json::to_string(self).unwrap_or_default())
+        serde_json::to_string(self).unwrap_or_default()
     }
 }

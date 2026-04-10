@@ -1,7 +1,7 @@
+use crate::config::AppConfig;
 use crate::converter::{claude_stream_to_openai, claude_to_openai, openai_to_claude};
 use crate::models::claude::{ClaudeResponse, ClaudeStreamEvent};
 use crate::models::openai::{OpenAIRequest, OpenAIResponse, OpenAIStreamChunk};
-use crate::router::{ClientId, Router};
 use axum::response::sse::Event;
 use futures::stream::Stream;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -12,64 +12,58 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio_stream::StreamExt;
 
-/// Backend client for making Claude API requests
+/// Backend client for making Claude API requests with Coding Agent support
 pub struct BackendClient {
     client: reqwest::Client,
-    router: Arc<Router>,
+    config: Arc<AppConfig>,
 }
 
 impl BackendClient {
     /// Create a new backend client
-    pub fn new(router: Router) -> Self {
+    pub fn new(config: AppConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
+            .http1_only()  // Force HTTP/1.1
             .build()
             .expect("Failed to create HTTP client");
 
         BackendClient {
             client,
-            router: Arc::new(router),
+            config: Arc::new(config),
         }
     }
 
-    /// Get the router reference
-    pub fn router(&self) -> &Router {
-        &self.router
+    /// Get the config reference
+    pub fn config(&self) -> &AppConfig {
+        &self.config
     }
 
     /// Make a chat completion request
     pub async fn chat_completion(
         &self,
         request: OpenAIRequest,
-        client_ip: &str,
-        user_agent: &str,
     ) -> Result<OpenAIResponse, BackendError> {
-        let client_id = ClientId::new(client_ip, user_agent);
-        let backend = self.router.route(&client_id).await;
-
         tracing::info!(
-            "Routing request to backend: {} (client hash: {})",
-            backend.name,
-            client_id.routing_hash()
+            "Sending request to Coding Agent backend: {} (model: {})",
+            self.config.base_url,
+            self.config.model
         );
 
         // Convert OpenAI request to Claude request
         let claude_request = openai_to_claude(&request);
 
-        // Make the request
-        let url = format!(
-            "{}{}",
-            backend.base_url.trim_end_matches('/'),
-            "/v1/messages"
-        );
+        // Make the request with Coding Agent header
+        let url = format!("{}{}", self.config.base_url, "/v1/messages");
 
         let response = self
             .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .header(AUTHORIZATION, format!("Bearer {}", backend.api_key))
+            .header(AUTHORIZATION, format!("Bearer {}", self.config.api_key))
             .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "managed-agents-2026-04-01")
+            .header("User-Agent", "curl/8.18.0")
             .json(&claude_request)
             .send()
             .await?;
@@ -78,15 +72,11 @@ impl BackendClient {
         if !status.is_success() {
             let error_body = response.text().await?;
             tracing::error!("Backend error: status={}, body={}", status, error_body);
-            self.router.report_failure(&backend.name).await;
             return Err(BackendError::ApiError(status.as_u16(), error_body));
         }
 
         // Parse Claude response
         let claude_response: ClaudeResponse = response.json().await?;
-
-        // Report success
-        self.router.report_success(&backend.name).await;
 
         // Convert to OpenAI response
         let openai_response = claude_to_openai(&claude_response, &request.model);
@@ -98,57 +88,47 @@ impl BackendClient {
     pub async fn chat_completion_stream(
         &self,
         request: OpenAIRequest,
-        client_ip: &str,
-        user_agent: &str,
     ) -> Result<impl Stream<Item = Result<Event, Infallible>> + Send + use<>, BackendError> {
-        let client_id = ClientId::new(client_ip, user_agent);
-        let backend = self.router.route(&client_id).await;
-
         tracing::info!(
-            "Routing stream request to backend: {} (client hash: {})",
-            backend.name,
-            client_id.routing_hash()
+            "Sending stream request to Coding Agent backend: {} (model: {})",
+            self.config.base_url,
+            self.config.model
         );
 
         // Convert OpenAI request to Claude request
         let claude_request = openai_to_claude(&request);
         let model = request.model.clone();
 
-        // Make the streaming request
-        let url = format!(
-            "{}{}",
-            backend.base_url.trim_end_matches('/'),
-            "/v1/messages"
-        );
+        // Make the streaming request with Coding Agent header
+        let url = format!("{}{}", self.config.base_url, "/v1/messages");
 
         let response = self
             .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "text/event-stream")
-            .header(AUTHORIZATION, format!("Bearer {}", backend.api_key))
+            .header(AUTHORIZATION, format!("Bearer {}", self.config.api_key))
             .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "managed-agents-2026-04-01")
+            .header("User-Agent", "curl/8.18.0")
             .json(&claude_request)
             .send()
             .await?;
 
         let status = response.status();
-        let backend_name = backend.name.clone();
 
         if !status.is_success() {
             let error_body = response.text().await?;
             tracing::error!("Backend stream error: status={}, body={}", status, error_body);
-            self.router.report_failure(&backend.name).await;
             return Err(BackendError::ApiError(status.as_u16(), error_body));
         }
 
         // Create streaming response converter
         let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4().simple());
         let created = chrono::Utc::now().timestamp();
-        let router = self.router.clone();
 
         // Convert Claude SSE stream to OpenAI SSE stream
-        let stream = ClaudeToOpenAIStream::new(response, response_id, model, created, router, backend_name);
+        let stream = ClaudeToOpenAIStream::new(response, response_id, model, created);
 
         Ok(stream.map(|s| Ok(Event::default().data(s))))
     }
@@ -187,10 +167,7 @@ pub struct ClaudeToOpenAIStream {
     response_id: String,
     model: String,
     created: i64,
-    router: Arc<Router>,
-    backend_name: String,
     is_done: bool,
-    reported_success: bool,
 }
 
 impl ClaudeToOpenAIStream {
@@ -199,8 +176,6 @@ impl ClaudeToOpenAIStream {
         response_id: String,
         model: String,
         created: i64,
-        router: Arc<Router>,
-        backend_name: String,
     ) -> Self {
         ClaudeToOpenAIStream {
             inner: Box::pin(response.bytes_stream()),
@@ -208,10 +183,7 @@ impl ClaudeToOpenAIStream {
             response_id,
             model,
             created,
-            router,
-            backend_name,
             is_done: false,
-            reported_success: false,
         }
     }
 
@@ -245,10 +217,9 @@ impl ClaudeToOpenAIStream {
                         self.created,
                     );
 
-                    // Check if message_stop - mark done but don't await here
+                    // Check if message_stop
                     if matches!(claude_event, ClaudeStreamEvent::MessageStop) {
                         self.is_done = true;
-                        self.reported_success = true;
                     }
 
                     outputs.extend(chunks);
@@ -267,16 +238,6 @@ impl Stream for ClaudeToOpenAIStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.is_done && self.buffer.is_empty() {
-            // Report success asynchronously via waker
-            if self.reported_success {
-                // Spawn task to report success (non-blocking)
-                let router = self.router.clone();
-                let backend_name = self.backend_name.clone();
-                tokio::spawn(async move {
-                    router.report_success(&backend_name).await;
-                });
-                self.reported_success = false;
-            }
             return Poll::Ready(None);
         }
 
@@ -302,12 +263,6 @@ impl Stream for ClaudeToOpenAIStream {
             }
             Poll::Ready(Some(Err(e))) => {
                 tracing::error!("Stream error: {}", e);
-                // Spawn task to report failure
-                let router = self.router.clone();
-                let backend_name = self.backend_name.clone();
-                tokio::spawn(async move {
-                    router.report_failure(&backend_name).await;
-                });
                 Poll::Ready(None)
             }
             Poll::Ready(None) => {

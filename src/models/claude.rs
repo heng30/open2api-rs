@@ -9,7 +9,7 @@ pub struct ClaudeRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
@@ -201,4 +201,8 @@ impl ClaudeResponse {
             .filter(|b| b.block_type == "tool_use")
             .collect()
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

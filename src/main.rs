@@ -1,5 +1,4 @@
 use open2api::config::AppConfig;
-use open2api::router::Router;
 use open2api::backend::BackendClient;
 use open2api::server::{create_router, AppState};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -20,18 +19,18 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = AppConfig::from_env()?;
-    tracing::info!("Loaded {} backend(s)", config.backends.len());
-    for backend in &config.backends {
-        tracing::info!(
-            "  Backend: {} -> {}",
-            backend.name,
-            backend.base_url
-        );
-    }
+    tracing::info!("Loaded Coding Agent backend configuration:");
+    tracing::info!(
+        "  Base URL: {}",
+        config.base_url
+    );
+    tracing::info!(
+        "  Model: {}",
+        config.model
+    );
 
-    // Create router and backend client
-    let router = Router::from_backends(config.backends.clone());
-    let client = BackendClient::new(router);
+    // Create backend client
+    let client = BackendClient::new(config.clone());
 
     // Create app state
     let state = AppState::new(client, config.clone());
@@ -49,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = TcpListener::bind(addr).await?;
 
-    // Run server - axum 0.8 uses into_make_service_with_connect_info for ConnectInfo extractor
+    // Run server
     axum::serve(listener, app.into_make_service())
         .await?;
 

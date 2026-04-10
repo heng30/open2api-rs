@@ -1,106 +1,57 @@
-use anyhow::{Context, Result};
-use std::collections::HashMap;
+use anyhow::Result;
 use std::env;
 
-/// Configuration for a single backend
-#[derive(Debug, Clone)]
-pub struct BackendConfig {
-    pub name: String,
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-}
-
-/// Application configuration
+/// Application configuration for Coding Agent backend
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub host: String,
     pub port: u16,
-    pub backends: Vec<BackendConfig>,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    /// API keys for frontend authentication (required to access the proxy)
+    pub auth_keys: Vec<String>,
 }
 
 impl AppConfig {
     /// Load configuration from environment variables
     pub fn from_env() -> Result<Self> {
-        let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = env::var("PORT")
+        let host = env::var("OPEN2API_HOST")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+        let port = env::var("OPEN2API_PORT")
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(8080);
 
-        let backends = Self::discover_backends()?;
+        let base_url = env::var("OPEN2API_BACKEND_URL")
+            .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
 
-        if backends.is_empty() {
-            anyhow::bail!("No backends configured. Set at least BACKEND_1_BASE_URL and BACKEND_1_API_KEY");
-        }
+        let api_key = env::var("OPEN2API_BACKEND_API_KEY")
+            .expect("OPEN2API_BACKEND_API_KEY must be set");
+
+        let model = env::var("OPEN2API_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+
+        // Load authentication keys for accessing the proxy
+        // If set, requests must include a valid Bearer token
+        let auth_keys = env::var("OPEN2API_API_KEY")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(AppConfig {
             host,
             port,
-            backends,
+            base_url,
+            api_key,
+            model,
+            auth_keys,
         })
-    }
-
-    /// Discover backends from environment variables
-    /// Looks for patterns like BACKEND_1_BASE_URL, BACKEND_1_API_KEY, BACKEND_1_NAME
-    fn discover_backends() -> Result<Vec<BackendConfig>> {
-        let mut backends: Vec<BackendConfig> = Vec::new();
-        let mut backend_map: HashMap<String, HashMap<String, String>> = HashMap::new();
-
-        // Collect all BACKEND_* environment variables
-        for (key, value) in env::vars() {
-            if !key.starts_with("BACKEND_") {
-                continue;
-            }
-
-            // Parse key: BACKEND_1_BASE_URL -> ("1", "BASE_URL", value)
-            let rest = key.strip_prefix("BACKEND_").unwrap();
-            if let Some(underscore_pos) = rest.find('_') {
-                let id = &rest[..underscore_pos];
-                let field = &rest[underscore_pos + 1..];
-
-                backend_map
-                    .entry(id.to_string())
-                    .or_default()
-                    .insert(field.to_string(), value);
-            }
-        }
-
-        // Build BackendConfig from collected values
-        let mut ids: Vec<String> = backend_map.keys().cloned().collect();
-        ids.sort();
-
-        for id in ids {
-            let fields = backend_map.get(&id).context(format!("Backend {} fields", id))?;
-
-            let base_url = fields
-                .get("BASE_URL")
-                .context(format!("BACKEND_{}_BASE_URL not set", id))?
-                .clone();
-
-            let api_key = fields
-                .get("API_KEY")
-                .context(format!("BACKEND_{}_API_KEY not set", id))?
-                .clone();
-
-            let name = fields
-                .get("NAME")
-                .cloned()
-                .unwrap_or_else(|| format!("backend-{}", id));
-
-            let model = fields
-                .get("MODEL")
-                .context(format!("BACKEND_{}_MODEL not set", id))?
-                .clone();
-
-            backends.push(BackendConfig {
-                name,
-                base_url,
-                api_key,
-                model,
-            });
-        }
-
-        Ok(backends)
     }
 }

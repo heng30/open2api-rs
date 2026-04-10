@@ -120,6 +120,10 @@ fn convert_content(
     if let Some(c) = content {
         match c {
             OpenAIContent::Text(text) => {
+                // For simple text, return string directly
+                if tool_calls.is_none() || tool_calls.as_ref().unwrap().is_empty() {
+                    return ClaudeContent::Text(text.clone());
+                }
                 if !text.is_empty() {
                     blocks.push(ClaudeContentBlock {
                         block_type: "text".to_string(),
@@ -495,10 +499,7 @@ pub fn claude_stream_to_openai(
                     code: None,
                 },
             };
-            vec![format!(
-                "data: {}\n\n",
-                serde_json::to_string(&error_resp).unwrap_or_default()
-            )]
+            vec![serde_json::to_string(&error_resp).unwrap_or_default()]
         }
     }
 }

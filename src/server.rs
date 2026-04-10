@@ -48,6 +48,11 @@ async fn handle_chat_completions(
     headers: HeaderMap,
     request: Request,
 ) -> Response {
+    // Check authentication if API keys are configured
+    if !check_auth(&headers, &state.config.auth_keys) {
+        return auth_error_response();
+    }
+
     // Parse the request body
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
         Ok(b) => b,
@@ -71,41 +76,18 @@ async fn handle_chat_completions(
         }
     };
 
-    // Get client info for routing
-    // Use X-Forwarded-For or X-Real-IP header if available (reverse proxy setup)
-    // Otherwise, use a placeholder (in production, you'd use ConnectInfo with proper setup)
-    let client_ip = headers
-        .get("x-forwarded-for")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_string())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let user_agent = headers
-        .get("user-agent")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
     tracing::debug!(
-        "Chat request: model={}, stream={}, client_ip={}, user_agent={}",
+        "Chat request: model={}, stream={}",
         openai_request.model,
-        openai_request.stream,
-        client_ip,
-        user_agent
+        openai_request.stream
     );
 
     if openai_request.stream {
-        // Handle streaming request - pass owned strings
-        handle_stream_request(state, openai_request, client_ip, user_agent).await
+        // Handle streaming request
+        handle_stream_request(state, openai_request).await
     } else {
         // Handle non-streaming request
-        handle_non_stream_request(&state, openai_request, &client_ip, &user_agent).await
+        handle_non_stream_request(&state, openai_request).await
     }
 }
 
@@ -113,10 +95,8 @@ async fn handle_chat_completions(
 async fn handle_non_stream_request(
     state: &AppState,
     request: OpenAIRequest,
-    client_ip: &str,
-    user_agent: &str,
 ) -> Response {
-    match state.client.chat_completion(request, client_ip, user_agent).await {
+    match state.client.chat_completion(request).await {
         Ok(response) => Json(response).into_response(),
         Err(BackendError::ApiError(status, body)) => {
             tracing::error!("API error {}: {}", status, body);
@@ -137,10 +117,8 @@ async fn handle_non_stream_request(
 async fn handle_stream_request(
     state: AppState,
     request: OpenAIRequest,
-    client_ip: String,
-    user_agent: String,
 ) -> Response {
-    match state.client.chat_completion_stream(request, &client_ip, &user_agent).await {
+    match state.client.chat_completion_stream(request).await {
         Ok(stream) => Sse::new(stream)
             .keep_alive(axum::response::sse::KeepAlive::new())
             .into_response(),
@@ -160,7 +138,15 @@ async fn handle_stream_request(
 }
 
 /// Handle models endpoint
-async fn handle_models(_state: State<AppState>) -> Response {
+async fn handle_models(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    // Check authentication if API keys are configured
+    if !check_auth(&headers, &state.config.auth_keys) {
+        return auth_error_response();
+    }
+
     // Return a list of supported models
     let models: Vec<OpenAIModel> = vec![
         OpenAIModel {
@@ -203,12 +189,50 @@ async fn handle_models(_state: State<AppState>) -> Response {
 
 /// Handle health check endpoint
 async fn handle_health(State(state): State<AppState>) -> Response {
-    let health_summary = state.client.router().pool().get_health_summary().await;
-
     Json(serde_json::json!({
         "status": "ok",
-        "backends": health_summary
+        "backend": {
+            "base_url": state.config.base_url,
+            "model": state.config.model
+        }
     })).into_response()
+}
+
+/// Check if the request has valid authentication
+fn check_auth(headers: &HeaderMap, allowed_keys: &[String]) -> bool {
+    // If no keys configured, allow all requests
+    if allowed_keys.is_empty() {
+        return true;
+    }
+
+    // Extract Bearer token from Authorization header
+    let auth_header = match headers.get("authorization").and_then(|h| h.to_str().ok()) {
+        Some(h) => h,
+        None => return false,
+    };
+
+    // Parse "Bearer <token>"
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t.trim(),
+        None => return false,
+    };
+
+    // Check if token matches any allowed key
+    allowed_keys.iter().any(|k| k == token)
+}
+
+/// Create an authentication error response
+fn auth_error_response() -> Response {
+    let error = OpenAIError {
+        error: OpenAIErrorDetail {
+            message: "Invalid or missing API key".to_string(),
+            error_type: "authentication_error".to_string(),
+            param: None,
+            code: Some("401".to_string()),
+        },
+    };
+
+    (StatusCode::UNAUTHORIZED, Json(error)).into_response()
 }
 
 /// Create an error response
