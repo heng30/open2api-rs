@@ -1,0 +1,10 @@
+/target
+/tmp
+/dist
+
+# Environment variables (may contain sensitive data)
+.env
+a.sh
+
+# Database
+data/
