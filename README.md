@@ -9,7 +9,6 @@ Convert Claude API to OpenAI compatible API.
 ### Features
 
 - OpenAI-compatible `/v1/chat/completions` endpoint
-- OpenAI-compatible `/v1/models` endpoint
 - Health check endpoint at `/health`
 - Support for streaming and non-streaming responses
 - CORS enabled for browser-based clients
@@ -65,24 +64,11 @@ OPEN2API_API_KEY=your-secret-key
 RUST_LOG=info
 ```
 
-## Supported Models
-
-The following Claude models are exposed:
-
-- `claude-3-opus`
-- `claude-3-sonnet`
-- `claude-3-haiku`
-- `claude-3-5-sonnet`
-- `claude-3-5-opus`
-
-For Bailian Coding Agent, use the model names supported by Bailian (e.g., `qwen3.5-plus`).
-
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | Chat completions (OpenAI compatible) |
-| `/v1/models` | GET | List available models |
 | `/health` | GET | Health check with backend status |
 
 ## Usage Examples
@@ -116,12 +102,6 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     ],
     "stream": true
   }'
-```
-
-### List Models
-
-```bash
-curl -H "Authorization: Bearer your-secret-key" http://localhost:8080/v1/models
 ```
 
 ### Health Check

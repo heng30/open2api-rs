@@ -60,4 +60,5 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
 bot = { path = "lib/bot" }
+dotenvy.workspace = true
 env_logger.workspace = true

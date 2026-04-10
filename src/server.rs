@@ -1,7 +1,7 @@
-use crate::backend::{BackendClient, BackendError};
-use crate::config::AppConfig;
-use crate::models::openai::{
-    OpenAIError, OpenAIErrorDetail, OpenAIModel, OpenAIModelsResponse, OpenAIRequest,
+use crate::{
+    backend::{BackendClient, BackendError},
+    config::AppConfig,
+    models::openai::{OpenAIError, OpenAIErrorDetail, OpenAIRequest},
 };
 use axum::{
     Router as AxumRouter,
@@ -13,7 +13,6 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-/// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {
     pub client: Arc<BackendClient>,
@@ -29,7 +28,6 @@ impl AppState {
     }
 }
 
-/// Create the Axum router (returns Router<()> for use with into_make_service_with_connect_info)
 pub fn create_router(state: AppState) -> AxumRouter {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -38,24 +36,20 @@ pub fn create_router(state: AppState) -> AxumRouter {
 
     AxumRouter::new()
         .route("/v1/chat/completions", post(handle_chat_completions))
-        .route("/v1/models", get(handle_models))
         .route("/health", get(handle_health))
         .layer(cors)
         .with_state(state)
 }
 
-/// Handle chat completions endpoint
 async fn handle_chat_completions(
     State(state): State<AppState>,
     headers: HeaderMap,
     request: Request,
 ) -> Response {
-    // Check authentication if API keys are configured
     if !check_auth(&headers, &state.config.auth_keys) {
         return auth_error_response();
     }
 
-    // Parse the request body
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
@@ -84,7 +78,6 @@ async fn handle_chat_completions(
         openai_request.stream
     );
 
-    // Validate model name
     if openai_request.model != state.config.model {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -97,15 +90,12 @@ async fn handle_chat_completions(
     }
 
     if openai_request.stream {
-        // Handle streaming request
         handle_stream_request(state, openai_request).await
     } else {
-        // Handle non-streaming request
         handle_non_stream_request(&state, openai_request).await
     }
 }
 
-/// Handle non-streaming chat completion request
 async fn handle_non_stream_request(state: &AppState, request: OpenAIRequest) -> Response {
     match state.client.chat_completion(request).await {
         Ok(response) => Json(response).into_response(),
@@ -128,7 +118,6 @@ async fn handle_non_stream_request(state: &AppState, request: OpenAIRequest) -> 
     }
 }
 
-/// Handle streaming chat completion request
 async fn handle_stream_request(state: AppState, request: OpenAIRequest) -> Response {
     match state.client.chat_completion_stream(request).await {
         Ok(stream) => Sse::new(stream)
@@ -153,55 +142,6 @@ async fn handle_stream_request(state: AppState, request: OpenAIRequest) -> Respo
     }
 }
 
-/// Handle models endpoint
-async fn handle_models(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    // Check authentication if API keys are configured
-    if !check_auth(&headers, &state.config.auth_keys) {
-        return auth_error_response();
-    }
-
-    // Return a list of supported models
-    let models: Vec<OpenAIModel> = vec![
-        OpenAIModel {
-            id: "claude-3-opus".to_string(),
-            object: "model".to_string(),
-            created: 1700000000,
-            owned_by: "anthropic".to_string(),
-        },
-        OpenAIModel {
-            id: "claude-3-sonnet".to_string(),
-            object: "model".to_string(),
-            created: 1700000000,
-            owned_by: "anthropic".to_string(),
-        },
-        OpenAIModel {
-            id: "claude-3-haiku".to_string(),
-            object: "model".to_string(),
-            created: 1700000000,
-            owned_by: "anthropic".to_string(),
-        },
-        OpenAIModel {
-            id: "claude-3-5-sonnet".to_string(),
-            object: "model".to_string(),
-            created: 1700000000,
-            owned_by: "anthropic".to_string(),
-        },
-        OpenAIModel {
-            id: "claude-3-5-opus".to_string(),
-            object: "model".to_string(),
-            created: 1700000000,
-            owned_by: "anthropic".to_string(),
-        },
-    ];
-
-    Json(OpenAIModelsResponse {
-        object: "list".to_string(),
-        data: models,
-    })
-    .into_response()
-}
-
-/// Handle health check endpoint
 async fn handle_health(State(state): State<AppState>) -> Response {
     Json(serde_json::json!({
         "status": "ok",
@@ -213,30 +153,24 @@ async fn handle_health(State(state): State<AppState>) -> Response {
     .into_response()
 }
 
-/// Check if the request has valid authentication
 fn check_auth(headers: &HeaderMap, allowed_keys: &[String]) -> bool {
-    // If no keys configured, allow all requests
     if allowed_keys.is_empty() {
         return true;
     }
 
-    // Extract Bearer token from Authorization header
     let auth_header = match headers.get("authorization").and_then(|h| h.to_str().ok()) {
         Some(h) => h,
         None => return false,
     };
 
-    // Parse "Bearer <token>"
     let token = match auth_header.strip_prefix("Bearer ") {
         Some(t) => t.trim(),
         None => return false,
     };
 
-    // Check if token matches any allowed key
     allowed_keys.iter().any(|k| k == token)
 }
 
-/// Create an authentication error response
 fn auth_error_response() -> Response {
     let error = OpenAIError {
         error: OpenAIErrorDetail {
@@ -250,7 +184,6 @@ fn auth_error_response() -> Response {
     (StatusCode::UNAUTHORIZED, Json(error)).into_response()
 }
 
-/// Create an error response
 fn error_response(status: StatusCode, error_type: &str, message: &str) -> Response {
     let error = OpenAIError {
         error: OpenAIErrorDetail {

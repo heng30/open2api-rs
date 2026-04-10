@@ -41,7 +41,7 @@ impl AppConfig {
         let default_max_tokens = env::var("OPEN2API_DEFAULT_MAX_TOKENS")
             .ok()
             .and_then(|t| t.parse().ok())
-            .unwrap_or(128 * 1024);
+            .unwrap_or(64 * 1024);
 
         Ok(AppConfig {
             host,
