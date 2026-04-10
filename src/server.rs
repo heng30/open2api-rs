@@ -1,7 +1,9 @@
 use crate::{
     backend::{BackendClient, BackendError},
     config::AppConfig,
-    models::openai::{OpenAIError, OpenAIErrorDetail, OpenAIRequest},
+    models::openai::{
+        OpenAIError, OpenAIErrorDetail, OpenAIModel, OpenAIModelsResponse, OpenAIRequest,
+    },
 };
 use axum::{
     Router as AxumRouter,
@@ -36,6 +38,7 @@ pub fn create_router(state: AppState) -> AxumRouter {
 
     AxumRouter::new()
         .route("/v1/chat/completions", post(handle_chat_completions))
+        .route("/v1/models", get(handle_models))
         .route("/health", get(handle_health))
         .layer(cors)
         .with_state(state)
@@ -78,13 +81,14 @@ async fn handle_chat_completions(
         openai_request.stream
     );
 
-    if openai_request.model != state.config.model {
+    if !state.config.models.contains(&openai_request.model) {
         return error_response(
             StatusCode::BAD_REQUEST,
             "invalid_request_error",
             &format!(
-                "Model '{}' is not supported. This server only supports '{}'",
-                openai_request.model, state.config.model
+                "Model '{}' is not supported. Supported models: {}",
+                openai_request.model,
+                state.config.models.join(", ")
             ),
         );
     }
@@ -147,9 +151,30 @@ async fn handle_health(State(state): State<AppState>) -> Response {
         "status": "ok",
         "backend": {
             "base_url": state.config.base_url,
-            "model": state.config.model
+            "models": state.config.models
         }
     }))
+    .into_response()
+}
+
+async fn handle_models(State(state): State<AppState>) -> Response {
+    let created = chrono::Utc::now().timestamp();
+    let models: Vec<OpenAIModel> = state
+        .config
+        .models
+        .iter()
+        .map(|m| OpenAIModel {
+            id: m.clone(),
+            object: "model".to_string(),
+            created,
+            owned_by: "open2api".to_string(),
+        })
+        .collect();
+
+    Json(OpenAIModelsResponse {
+        object: "list".to_string(),
+        data: models,
+    })
     .into_response()
 }
 

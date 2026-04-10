@@ -28,8 +28,9 @@
 | `OPEN2API_PORT` | 否 | 服务器端口 | `8080` |
 | `OPEN2API_BACKEND_URL` | 否 | 后端 API 基础 URL | `https://api.anthropic.com` |
 | `OPEN2API_BACKEND_API_KEY` | 是 | 后端 API 密钥 | - |
-| `OPEN2API_MODEL` | 否 | 默认模型名称 | `claude-sonnet-4-6` |
-| `OPEN2API_API_KEY` | 否 | 前端认证密钥（逗号分隔支持多个）。若不设置，则无需认证。 | - |
+| `OPEN2API_MODELS` | 否 | 支持的模型名称（逗号分隔） | `claude-sonnet-4-6` |
+| `OPEN2API_MODEL` | 否 | （已弃用）单个模型名称，作为 `OPEN2API_MODELS` 未设置时的备用 | - |
+| `OPEN2API_API_KEYS` | 否 | 前端认证密钥（逗号分隔支持多个）。若不设置，则无需认证。 | - |
 
 ### 阿里云百炼 Coding Agent
 
@@ -38,12 +39,9 @@
 ```env
 OPEN2API_BACKEND_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic
 OPEN2API_BACKEND_API_KEY=sk-xxx
-OPEN2API_MODEL=qwen3.5-plus
+OPEN2API_MODELS=qwen3.5-plus,claude-sonnet-4-6
 ```
 
-代理会自动添加所需的请求头：
-- `anthropic-version: 2023-06-01`
-- `anthropic-beta: managed-agents-2026-04-01`
 
 ### `.env` 文件示例
 
@@ -55,11 +53,11 @@ OPEN2API_PORT=8080
 # 后端配置（阿里云百炼）
 OPEN2API_BACKEND_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic
 OPEN2API_BACKEND_API_KEY=sk-xxx
-OPEN2API_MODEL=qwen3.5-plus
+OPEN2API_MODELS=qwen3.5-plus,claude-sonnet-4-6
 
 # 前端认证（可选）
 # 如果设置，请求需要包含 Authorization: Bearer <密钥>
-OPEN2API_API_KEY=your-secret-key
+OPEN2API_API_KEYS=your-secret-key
 
 # 日志配置
 RUST_LOG=info

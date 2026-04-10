@@ -49,9 +49,9 @@ impl BackendClient {
         request: OpenAIRequest,
     ) -> Result<OpenAIResponse, BackendError> {
         tracing::info!(
-            "Sending request to Coding Agent backend: {} (model: {})",
+            "Sending request to Coding Agent backend: {} (models: {})",
             self.config.base_url,
-            self.config.model
+            self.config.models.join(", ")
         );
 
         let claude_request = openai_to_claude(&request, self.config.default_max_tokens);
@@ -64,8 +64,6 @@ impl BackendClient {
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
             .header(AUTHORIZATION, format!("Bearer {}", self.config.api_key))
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "managed-agents-2026-04-01")
             .header("User-Agent", "curl/8.18.0")
             .json(&claude_request)
             .send()
@@ -89,9 +87,9 @@ impl BackendClient {
         request: OpenAIRequest,
     ) -> Result<impl Stream<Item = Result<Event, Infallible>> + Send + use<>, BackendError> {
         tracing::info!(
-            "Sending stream request to Coding Agent backend: {} (model: {})",
+            "Sending stream request to Coding Agent backend: {} (models: {})",
             self.config.base_url,
-            self.config.model
+            self.config.models.join(", ")
         );
 
         let model = request.model.clone();
@@ -104,8 +102,6 @@ impl BackendClient {
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "text/event-stream")
             .header(AUTHORIZATION, format!("Bearer {}", self.config.api_key))
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "managed-agents-2026-04-01")
             .header("User-Agent", "curl/8.18.0")
             .json(&claude_request)
             .send()
@@ -267,4 +263,3 @@ impl Stream for ClaudeToOpenAIStream {
         }
     }
 }
-

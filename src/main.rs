@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::from_env()?;
     tracing::info!("Loaded Coding Agent backend configuration:");
     tracing::info!("  Base URL: {}", config.base_url);
-    tracing::info!("  Model: {}", config.model);
+    tracing::info!("  Models: {}", config.models.join(", "));
 
     let client = BackendClient::new(config.clone());
     let state = AppState::new(client, config.clone());
@@ -34,4 +34,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

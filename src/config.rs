@@ -7,7 +7,7 @@ pub struct AppConfig {
     pub port: u16,
     pub base_url: String,
     pub api_key: String,
-    pub model: String,
+    pub models: Vec<String>,
     pub default_max_tokens: u32,
     pub auth_keys: Vec<String>,
 }
@@ -26,9 +26,19 @@ impl AppConfig {
 
         let api_key =
             env::var("OPEN2API_BACKEND_API_KEY").expect("OPEN2API_BACKEND_API_KEY must be set");
-        let model = env::var("OPEN2API_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
-        let auth_keys = env::var("OPEN2API_API_KEY")
+        let models = env::var("OPEN2API_MODELS")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect()
+            })
+            .or_else(|| env::var("OPEN2API_MODEL").ok().map(|m| vec![m]))
+            .unwrap_or_else(|| vec!["claude-sonnet-4-6".to_string()]);
+
+        let auth_keys = env::var("OPEN2API_API_KEYS")
             .ok()
             .map(|s| {
                 s.split(',')
@@ -48,10 +58,9 @@ impl AppConfig {
             port,
             base_url,
             api_key,
-            model,
+            models,
             default_max_tokens,
             auth_keys,
         })
     }
 }
-

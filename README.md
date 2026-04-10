@@ -9,6 +9,7 @@ Convert Claude API to OpenAI compatible API.
 ### Features
 
 - OpenAI-compatible `/v1/chat/completions` endpoint
+- OpenAI-compatible `/v1/models` endpoint
 - Health check endpoint at `/health`
 - Support for streaming and non-streaming responses
 - CORS enabled for browser-based clients
@@ -27,8 +28,9 @@ Configuration is done through environment variables. You can set them directly o
 | `OPEN2API_PORT` | No | Server port | `8080` |
 | `OPEN2API_BACKEND_URL` | No | Backend API base URL | `https://api.anthropic.com` |
 | `OPEN2API_BACKEND_API_KEY` | Yes | Backend API key | - |
-| `OPEN2API_MODEL` | No | Default model name | `claude-sonnet-4-6` |
-| `OPEN2API_API_KEY` | No | Frontend authentication keys (comma-separated). If not set, no authentication required. | - |
+| `OPEN2API_MODELS` | No | Supported model names (comma-separated) | `claude-sonnet-4-6` |
+| `OPEN2API_MODEL` | No | (Deprecated) Single model name, fallback if `OPEN2API_MODELS` not set | - |
+| `OPEN2API_API_KEYS` | No | Frontend authentication keys (comma-separated). If not set, no authentication required. | - |
 
 ### Alibaba Cloud Bailian Coding Agent
 
@@ -37,12 +39,8 @@ The proxy supports the Alibaba Cloud Bailian Coding Agent API. To use it:
 ```env
 OPEN2API_BACKEND_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic
 OPEN2API_BACKEND_API_KEY=sk-xxx
-OPEN2API_MODEL=qwen3.5-plus
+OPEN2API_MODELS=qwen3.5-plus,claude-sonnet-4-6
 ```
-
-The proxy automatically adds the required headers:
-- `anthropic-version: 2023-06-01`
-- `anthropic-beta: managed-agents-2026-04-01`
 
 ### Example `.env` File
 
@@ -54,21 +52,34 @@ OPEN2API_PORT=8080
 # Backend Configuration (Alibaba Cloud Bailian)
 OPEN2API_BACKEND_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic
 OPEN2API_BACKEND_API_KEY=sk-xxx
-OPEN2API_MODEL=qwen3.5-plus
+OPEN2API_MODELS=qwen3.5-plus,claude-sonnet-4-6
 
 # Frontend Authentication (optional)
 # If set, requests must include Authorization: Bearer <key>
-OPEN2API_API_KEY=your-secret-key
+OPEN2API_API_KEYS=your-secret-key
 
 # Logging
 RUST_LOG=info
 ```
+
+## Supported Models
+
+The following Claude models are exposed:
+
+- `claude-3-opus`
+- `claude-3-sonnet`
+- `claude-3-haiku`
+- `claude-3-5-sonnet`
+- `claude-3-5-opus`
+
+For Bailian Coding Agent, use the model names supported by Bailian (e.g., `qwen3.5-plus`).
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | Chat completions (OpenAI compatible) |
+| `/v1/models` | GET | Get available models list |
 | `/health` | GET | Health check with backend status |
 
 ## Usage Examples
@@ -102,6 +113,12 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     ],
     "stream": true
   }'
+```
+
+### Get Models List
+
+```bash
+curl -H "Authorization: Bearer your-secret-key" http://localhost:8080/v1/models
 ```
 
 ### Health Check
