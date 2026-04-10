@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+pkill open2api
+source $HOME/init/shell-init.sh
+cd $HOME/.local/bin/open2api-dist && ./open2api
