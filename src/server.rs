@@ -1,12 +1,14 @@
 use crate::backend::{BackendClient, BackendError};
 use crate::config::AppConfig;
-use crate::models::openai::{OpenAIError, OpenAIErrorDetail, OpenAIModel, OpenAIModelsResponse, OpenAIRequest};
+use crate::models::openai::{
+    OpenAIError, OpenAIErrorDetail, OpenAIModel, OpenAIModelsResponse, OpenAIRequest,
+};
 use axum::{
+    Router as AxumRouter,
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response, Sse},
     routing::{get, post},
-    Router as AxumRouter,
 };
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -82,6 +84,18 @@ async fn handle_chat_completions(
         openai_request.stream
     );
 
+    // Validate model name
+    if openai_request.model != state.config.model {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            &format!(
+                "Model '{}' is not supported. This server only supports '{}'",
+                openai_request.model, state.config.model
+            ),
+        );
+    }
+
     if openai_request.stream {
         // Handle streaming request
         handle_stream_request(state, openai_request).await
@@ -92,10 +106,7 @@ async fn handle_chat_completions(
 }
 
 /// Handle non-streaming chat completion request
-async fn handle_non_stream_request(
-    state: &AppState,
-    request: OpenAIRequest,
-) -> Response {
+async fn handle_non_stream_request(state: &AppState, request: OpenAIRequest) -> Response {
     match state.client.chat_completion(request).await {
         Ok(response) => Json(response).into_response(),
         Err(BackendError::ApiError(status, body)) => {
@@ -108,16 +119,17 @@ async fn handle_non_stream_request(
         }
         Err(e) => {
             tracing::error!("Backend error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e.to_string())
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                &e.to_string(),
+            )
         }
     }
 }
 
 /// Handle streaming chat completion request
-async fn handle_stream_request(
-    state: AppState,
-    request: OpenAIRequest,
-) -> Response {
+async fn handle_stream_request(state: AppState, request: OpenAIRequest) -> Response {
     match state.client.chat_completion_stream(request).await {
         Ok(stream) => Sse::new(stream)
             .keep_alive(axum::response::sse::KeepAlive::new())
@@ -132,16 +144,17 @@ async fn handle_stream_request(
         }
         Err(e) => {
             tracing::error!("Backend stream error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e.to_string())
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                &e.to_string(),
+            )
         }
     }
 }
 
 /// Handle models endpoint
-async fn handle_models(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+async fn handle_models(State(state): State<AppState>, headers: HeaderMap) -> Response {
     // Check authentication if API keys are configured
     if !check_auth(&headers, &state.config.auth_keys) {
         return auth_error_response();
@@ -184,7 +197,8 @@ async fn handle_models(
     Json(OpenAIModelsResponse {
         object: "list".to_string(),
         data: models,
-    }).into_response()
+    })
+    .into_response()
 }
 
 /// Handle health check endpoint
@@ -195,7 +209,8 @@ async fn handle_health(State(state): State<AppState>) -> Response {
             "base_url": state.config.base_url,
             "model": state.config.model
         }
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// Check if the request has valid authentication

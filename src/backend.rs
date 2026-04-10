@@ -1,29 +1,36 @@
-use crate::config::AppConfig;
-use crate::converter::{claude_stream_to_openai, claude_to_openai, openai_to_claude};
-use crate::models::claude::{ClaudeResponse, ClaudeStreamEvent};
-use crate::models::openai::{OpenAIRequest, OpenAIResponse, OpenAIStreamChunk};
+use crate::{
+    config::AppConfig,
+    converter::{claude_stream_to_openai, claude_to_openai, openai_to_claude},
+    models::{
+        claude::{ClaudeResponse, ClaudeStreamEvent},
+        openai::{OpenAIRequest, OpenAIResponse, OpenAIStreamChunk},
+    },
+};
 use axum::response::sse::Event;
 use futures::stream::Stream;
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use std::convert::Infallible;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use reqwest::{
+    Client as HttpClient, Response as HttpResponse,
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
+};
+use std::{
+    convert::Infallible,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 use tokio_stream::StreamExt;
 
-/// Backend client for making Claude API requests with Coding Agent support
 pub struct BackendClient {
-    client: reqwest::Client,
+    client: HttpClient,
     config: Arc<AppConfig>,
 }
 
 impl BackendClient {
-    /// Create a new backend client
     pub fn new(config: AppConfig) -> Self {
-        let client = reqwest::Client::builder()
+        let client = HttpClient::builder()
             .timeout(Duration::from_secs(120))
-            .http1_only()  // Force HTTP/1.1
+            .http1_only() // Force HTTP/1.1
             .build()
             .expect("Failed to create HTTP client");
 
@@ -33,12 +40,10 @@ impl BackendClient {
         }
     }
 
-    /// Get the config reference
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
 
-    /// Make a chat completion request
     pub async fn chat_completion(
         &self,
         request: OpenAIRequest,
@@ -49,12 +54,10 @@ impl BackendClient {
             self.config.model
         );
 
-        // Convert OpenAI request to Claude request
-        let claude_request = openai_to_claude(&request);
-
-        // Make the request with Coding Agent header
+        let claude_request = openai_to_claude(&request, self.config.default_max_tokens);
         let url = format!("{}{}", self.config.base_url, "/v1/messages");
 
+        // todo
         let response = self
             .client
             .post(&url)
@@ -75,16 +78,12 @@ impl BackendClient {
             return Err(BackendError::ApiError(status.as_u16(), error_body));
         }
 
-        // Parse Claude response
         let claude_response: ClaudeResponse = response.json().await?;
-
-        // Convert to OpenAI response
         let openai_response = claude_to_openai(&claude_response, &request.model);
 
         Ok(openai_response)
     }
 
-    /// Make a streaming chat completion request
     pub async fn chat_completion_stream(
         &self,
         request: OpenAIRequest,
@@ -95,11 +94,8 @@ impl BackendClient {
             self.config.model
         );
 
-        // Convert OpenAI request to Claude request
-        let claude_request = openai_to_claude(&request);
         let model = request.model.clone();
-
-        // Make the streaming request with Coding Agent header
+        let claude_request = openai_to_claude(&request, self.config.default_max_tokens);
         let url = format!("{}{}", self.config.base_url, "/v1/messages");
 
         let response = self
@@ -119,22 +115,22 @@ impl BackendClient {
 
         if !status.is_success() {
             let error_body = response.text().await?;
-            tracing::error!("Backend stream error: status={}, body={}", status, error_body);
+            tracing::error!(
+                "Backend stream error: status={}, body={}",
+                status,
+                error_body
+            );
             return Err(BackendError::ApiError(status.as_u16(), error_body));
         }
 
-        // Create streaming response converter
         let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4().simple());
         let created = chrono::Utc::now().timestamp();
-
-        // Convert Claude SSE stream to OpenAI SSE stream
         let stream = ClaudeToOpenAIStream::new(response, response_id, model, created);
 
         Ok(stream.map(|s| Ok(Event::default().data(s))))
     }
 }
 
-/// Error type for backend operations
 #[derive(Debug)]
 pub enum BackendError {
     HttpError(reqwest::Error),
@@ -160,7 +156,6 @@ impl std::fmt::Display for BackendError {
 
 impl std::error::Error for BackendError {}
 
-/// Stream that converts Claude SSE events to OpenAI SSE format
 pub struct ClaudeToOpenAIStream {
     inner: Pin<Box<dyn tokio_stream::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
     buffer: String,
@@ -171,12 +166,7 @@ pub struct ClaudeToOpenAIStream {
 }
 
 impl ClaudeToOpenAIStream {
-    pub fn new(
-        response: reqwest::Response,
-        response_id: String,
-        model: String,
-        created: i64,
-    ) -> Self {
+    pub fn new(response: HttpResponse, response_id: String, model: String, created: i64) -> Self {
         ClaudeToOpenAIStream {
             inner: Box::pin(response.bytes_stream()),
             buffer: String::new(),
@@ -198,7 +188,6 @@ impl ClaudeToOpenAIStream {
                 continue;
             }
 
-            // Parse SSE event
             let mut data: Option<String> = None;
 
             for line in event_data.lines() {
@@ -208,7 +197,6 @@ impl ClaudeToOpenAIStream {
             }
 
             if let Some(data_str) = data {
-                // Parse Claude event
                 if let Ok(claude_event) = serde_json::from_str::<ClaudeStreamEvent>(&data_str) {
                     let chunks = claude_stream_to_openai(
                         &claude_event,
@@ -217,7 +205,6 @@ impl ClaudeToOpenAIStream {
                         self.created,
                     );
 
-                    // Check if message_stop
                     if matches!(claude_event, ClaudeStreamEvent::MessageStop) {
                         self.is_done = true;
                     }
@@ -241,13 +228,11 @@ impl Stream for ClaudeToOpenAIStream {
             return Poll::Ready(None);
         }
 
-        // First, try to get more output from existing buffer
         let outputs = self.process_buffer();
         if !outputs.is_empty() {
             return Poll::Ready(Some(outputs.join("")));
         }
 
-        // Poll for more bytes
         match self.inner.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
                 let text = String::from_utf8_lossy(&bytes);
@@ -266,12 +251,10 @@ impl Stream for ClaudeToOpenAIStream {
                 Poll::Ready(None)
             }
             Poll::Ready(None) => {
-                // Stream ended, process remaining buffer
                 let outputs = self.process_buffer();
                 if !outputs.is_empty() {
                     Poll::Ready(Some(outputs.join("")))
                 } else {
-                    // Send [DONE] if not already sent
                     if !self.is_done {
                         self.is_done = true;
                         Poll::Ready(Some(OpenAIStreamChunk::done_marker()))
@@ -284,3 +267,4 @@ impl Stream for ClaudeToOpenAIStream {
         }
     }
 }
+
