@@ -166,6 +166,47 @@ Create a `.env` file in the project root and run:
 cargo run --release
 ```
 
+## Deployment
+
+### Bundle and Install
+
+```bash
+# Build release binary
+cargo build --release
+
+# Create deployment bundle
+./bundle.sh [output_dir]
+
+# Install to ~/.local/bin/open2api-dist
+./install.sh
+```
+
+### Run Deployed Service
+
+```bash
+# Using the launcher script
+./open2api
+
+# Or run directly
+cd ~/.local/bin/open2api-dist && ./open2api
+```
+
+### Test Deployed API
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# List models
+curl -H "Authorization: Bearer your-secret-key" http://localhost:8080/v1/models
+
+# Chat completion
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{"model": "qwen3.5-plus", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
 ## License
 
 MIT

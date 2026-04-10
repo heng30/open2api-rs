@@ -167,6 +167,47 @@ OPEN2API_PORT=3000 cargo run --release
 cargo run --release
 ```
 
+## 部署
+
+### 打包和安装
+
+```bash
+# 构建发布版本
+cargo build --release
+
+# 创建部署包
+./bundle.sh [输出目录]
+
+# 安装到 ~/.local/bin/open2api-dist
+./install.sh
+```
+
+### 运行部署服务
+
+```bash
+# 使用启动脚本
+./open2api
+
+# 或直接运行
+cd ~/.local/bin/open2api-dist && ./open2api
+```
+
+### 测试部署 API
+
+```bash
+# 健康检查
+curl http://localhost:8080/health
+
+# 获取模型列表
+curl -H "Authorization: Bearer your-secret-key" http://localhost:8080/v1/models
+
+# 聊天补全
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{"model": "qwen3.5-plus", "messages": [{"role": "user", "content": "你好"}]}'
+```
+
 ## 许可证
 
 MIT
