@@ -8,6 +8,7 @@ pub struct BackendConfig {
     pub name: String,
     pub base_url: String,
     pub api_key: String,
+    pub model: String,
 }
 
 /// Application configuration
@@ -87,10 +88,16 @@ impl AppConfig {
                 .cloned()
                 .unwrap_or_else(|| format!("backend-{}", id));
 
+            let model = fields
+                .get("MODEL")
+                .context(format!("BACKEND_{}_MODEL not set", id))?
+                .clone();
+
             backends.push(BackendConfig {
                 name,
                 base_url,
                 api_key,
+                model,
             });
         }
 
